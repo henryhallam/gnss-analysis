@@ -24,6 +24,7 @@ import pandas as pd
 import sbp.navigation as nav
 import sbp.observation as ob
 import sbp.tracking as tr
+import sbp.logging as lg
 import swiftnav.gpstime as gpstime
 
 # Units conversations (length, time, and 8-bit fractional cycles)
@@ -48,9 +49,10 @@ class StoreToHDF5(object):
     self.rover_spp = {}
     self.rover_rtk_ned = {}
     self.rover_rtk_ecef = {}
+    self.rover_msgs = []
     self.time = None
 
-  def _process_obs(self, msg):
+  def _process_obs(self, msg, hosttime):
     if type(msg) is ob.MsgObs:
       time = time_fn(msg.header.t.wn, msg.header.t.tow / MSEC_TO_SECONDS)
       t = self.base_obs if from_base(msg) else self.rover_obs
@@ -63,21 +65,23 @@ class StoreToHDF5(object):
         else:
           t[time] = {o.prn: v}
 
-  def _process_eph(self, msg):
+  def _process_eph(self, msg, hosttime):
     if type(msg) is ob.MsgEphemeris or type(msg) is tr.MsgEphemerisOld:
       if msg.healthy == 1 and msg.valid == 1:
         time = gpstime.gpst_components2datetime(msg.toe_wn, msg.toe_tow)
         m = exclude_fields(msg)
+        m['hosttime'] = hosttime
         if time in self.ephemerides:
           self.ephemerides[time].update({msg.prn: m})
         else:
           self.ephemerides[time] = {msg.prn: m}
 
-  def _process_pos(self, msg):
+  def _process_pos(self, msg, hosttime):
     if type(msg) is nav.MsgGPSTime:
       self.time = msg
     elif self.time is not None:
       m = exclude_fields(msg)
+      m['hosttime'] = hosttime
       if type(msg) is nav.MsgPosECEF:
         time = time_fn(self.time.wn, msg.tow / MSEC_TO_SECONDS)
         m['tow'] /= MSEC_TO_SECONDS
@@ -97,10 +101,17 @@ class StoreToHDF5(object):
         m['z'] /= MM_TO_M
         self.rover_rtk_ecef[time] = m
 
-  def process_message(self, msg):
-    self._process_pos(msg)
-    self._process_eph(msg)
-    self._process_obs(msg)
+  def _process_print(self, msg, hosttime):
+    if type(msg) is lg.MsgPrint:
+      m = {'hosttime': hosttime, 'text': msg.text}
+      print hosttime, msg.text
+      self.rover_msgs.append(m)
+      
+  def process_message(self, msg, hosttime):
+    self._process_pos(msg, hosttime)
+    self._process_eph(msg, hosttime)
+    self._process_obs(msg, hosttime)
+    self._process_print(msg, hosttime)
 
   def save(self, filename):
     if os.path.exists(filename):
@@ -113,6 +124,7 @@ class StoreToHDF5(object):
     f.put('rover_spp', pd.DataFrame(self.rover_spp))
     f.put('rover_rtk_ned', pd.DataFrame(self.rover_rtk_ned))
     f.put('rover_rtk_ecef', pd.DataFrame(self.rover_rtk_ecef))
+    f.put('rover_msgs', pd.DataFrame(self.rover_msgs))
     f.close()
 
 
@@ -144,9 +156,9 @@ def main():
     for delta, timestamp, msg in log.next():
       i += 1
       if i % logging_interval == 0:
-        print "Processed %d records! @ %s sec." \
+        print "Processed %d records! @ %.1f sec." \
           % (i, time.time() - start)
-      processor.process_message(msg)
+      processor.process_message(msg, delta)
       if num_records is not None and i >= int(num_records):
         print "Processed %d records!" % i
         break
