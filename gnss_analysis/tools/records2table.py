@@ -83,6 +83,7 @@ class StoreToHDF5(object):
     self.rover_uart_state = {}
     self.rover_acq = {}
     self.time = None
+    self.unprocessed_msg_types = []
 
   def _process_obs(self, host_offset, host_time, msg):
     if type(msg) in [ob.MsgObs, ob.MsgObsDepA]:
@@ -112,6 +113,8 @@ class StoreToHDF5(object):
           ti[time].update({'counts':ti[time]['counts'] | 1 << count})
         else:
           ti[time] = {'total': total, 'counts':1 << count}
+      return True
+    return False
 
   def _process_eph(self, host_offset, host_time, msg):
     if type(msg) in [ob.MsgEphemeris,
@@ -134,10 +137,13 @@ class StoreToHDF5(object):
         t[msg.prn].update({host_offset: m})
       else:
         t[msg.prn] = {host_offset: m}
+      return True
+    return False
 
   def _process_pos(self, host_offset, host_time, msg):
     if type(msg) is nav.MsgGPSTime:
       self.time = msg
+      return True
     elif self.time is not None:
       m = exclude_fields(msg)
       m.update({'host_offset': host_offset, 'host_time': host_time})
@@ -163,6 +169,8 @@ class StoreToHDF5(object):
         m['y'] /= MM_TO_M
         m['z'] /= MM_TO_M
         self.rover_rtk_ecef[time] = m
+      return True
+    return False
 
   def _process_tracking(self, host_offset, host_time, msg):
     if type(msg) in [tr.MsgTrackingState, tr.MsgTrackingStateDepA]:
@@ -179,6 +187,8 @@ class StoreToHDF5(object):
         else:
           self.rover_tracking[prn] = {host_offset: d}
       del m['states']
+      return True
+    return False
 
   def _process_iar(self, host_offset, host_time, msg):
     if type(msg) is piksi.MsgIarState:
@@ -186,6 +196,8 @@ class StoreToHDF5(object):
       m['host_offset'] = host_offset
       m['host_time'] = host_time
       self.rover_iar_state[host_offset] = m
+      return True
+    return False
 
   def _process_log(self, host_offset, host_time, msg):
     if type(msg) is lg.MsgPrint:
@@ -193,6 +205,8 @@ class StoreToHDF5(object):
       m['host_offset'] = host_offset
       m['host_time'] = host_time
       self.rover_logs[host_offset] = m
+      return True
+    return False
 
   def _process_thread_state(self, host_offset, host_time, msg):
     if type(msg) is piksi.MsgThreadState:
@@ -207,6 +221,8 @@ class StoreToHDF5(object):
           self.rover_thread_state[name].update({host_offset: m})
         else:
           self.rover_thread_state[name] = {host_offset: m}
+      return True
+    return False
 
   def _process_uart_state(self, host_offset, host_time, msg):
     if type(msg) is piksi.MsgUartState:
@@ -229,6 +245,8 @@ class StoreToHDF5(object):
         self.rover_uart_state['latency'].update({host_offset: l})
       else:
         self.rover_uart_state['latency'] = {host_offset: l}
+      return True
+    return False
 
   def _process_acq(self, host_offset, host_time, msg):
     if type(msg) in [acq.MsgAcqResult, acq.MsgAcqResultDepA]:
@@ -240,6 +258,8 @@ class StoreToHDF5(object):
         self.rover_acq[prn].update({host_offset: m})
       else:
         self.rover_acq[prn] = {host_offset: m}
+      return True
+    return False
 
   def process_message(self, host_offset, host_time, msg):
     """Dispatches specific message types to the appropriate
@@ -255,15 +275,21 @@ class StoreToHDF5(object):
       SBP message payload
 
     """
-    self._process_acq(host_offset, host_time, msg)
-    self._process_eph(host_offset, host_time, msg)
-    self._process_iar(host_offset, host_time, msg)
-    self._process_log(host_offset, host_time, msg)
-    self._process_obs(host_offset, host_time, msg)
-    self._process_pos(host_offset, host_time, msg)
-    self._process_tracking(host_offset, host_time, msg)
-    self._process_thread_state(host_offset, host_time, msg)
-    self._process_uart_state(host_offset, host_time, msg)
+    processed = False
+    processed |= self._process_acq(host_offset, host_time, msg)
+    processed |= self._process_eph(host_offset, host_time, msg)
+    processed |= self._process_iar(host_offset, host_time, msg)
+    processed |= self._process_log(host_offset, host_time, msg)
+    processed |= self._process_obs(host_offset, host_time, msg)
+    processed |= self._process_pos(host_offset, host_time, msg)
+    processed |= self._process_tracking(host_offset, host_time, msg)
+    processed |= self._process_thread_state(host_offset, host_time, msg)
+    processed |= self._process_uart_state(host_offset, host_time, msg)
+    if not processed:
+      if type(msg) not in self.unprocessed_msg_types:
+        print msg
+        print "No handler for %s. Future msgs of same type will not be printed." % type(msg)
+        self.unprocessed_msg_types.append(type(msg))
 
   def save(self, filename):
     if os.path.exists(filename):
