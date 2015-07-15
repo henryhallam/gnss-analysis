@@ -600,71 +600,82 @@ class Plotter(object):
     """
     """
     # Define start and end of time series around GPS observation SNR
-    self.base_cn0 = self.hitl_log.base_obs[:, 'cn0', :].T/4.
     self.rover_cn0 = self.hitl_log.rover_obs[:, 'cn0', :].T/4.
     self.index = self.rover_cn0.index
     self.i = self.index[0]
     self.j = self.index[-1]
     if self.verbose:
       print "\nRover obs start @ %s and end @ %s.\n" % (self.i, self.j)
-    self.sdiff_L = get_sdiff('L', self.hitl_log.rover_obs, self.hitl_log.base_obs)
-    self.ddiff_L = get_ddiff(get_ref_sat(self.sdiff_L), self.sdiff_L)
-    self.sdiff_P = get_sdiff('P', self.hitl_log.rover_obs, self.hitl_log.base_obs)
-    self.ddiff_P = get_ddiff(get_ref_sat(self.sdiff_P), self.sdiff_P)
-    self.ddiff_L_t = get_ddiff_t(self.ddiff_L)
-    self.ddiff_P_t = get_ddiff_t(self.ddiff_P)
-    # Fixed and Float RTK solution
-    self.fixed = get_rtk_fixed(self.hitl_log)
-    self.fixed_r = get_distances(self.fixed, self.ref_rtk)
-    # Float RTK solution
-    self.float_pos = get_rtk_float(self.hitl_log)
-    self.float_r = get_distances(self.float_pos, self.ref_rtk)
     # SPP solution
     self.spp = get_spp(self.hitl_log)
     self.spp_r = get_distances(self.spp, self.ref_spp)
     # IAR state
     self.iar_state = self.hitl_log.rover_iar_state.T['num_hyps']
+    if len(self.hitl_log.base_obs):
+      self.base_cn0 = self.hitl_log.base_obs[:, 'cn0', :].T/4.
+      self.sdiff_L = get_sdiff('L', self.hitl_log.rover_obs, self.hitl_log.base_obs)
+      self.ddiff_L = get_ddiff(get_ref_sat(self.sdiff_L), self.sdiff_L)
+      self.sdiff_P = get_sdiff('P', self.hitl_log.rover_obs, self.hitl_log.base_obs)
+      self.ddiff_P = get_ddiff(get_ref_sat(self.sdiff_P), self.sdiff_P)
+      self.ddiff_L_t = get_ddiff_t(self.ddiff_L)
+      self.ddiff_P_t = get_ddiff_t(self.ddiff_P)
+    # Fixed and Float RTK solution
+    if len(self.hitl_log.rover_rtk_ned):
+      self.fixed = get_rtk_fixed(self.hitl_log)
+      self.fixed_r = get_distances(self.fixed, self.ref_rtk)
+      self.float_pos = get_rtk_float(self.hitl_log)
+      self.float_r = get_distances(self.float_pos, self.ref_rtk)
 
   def annotate(self):
     """
     """
     # Setup annotations
-    anns = [('logs', self.hitl_log.rover_logs.T['text']),
-            ('log_flash', mark_flash_saves(self.hitl_log)['text']),
-            ('log_trusted_eph', mark_new_trusted_ephs(self.hitl_log)['text']),
-            ('log_new_untrusted_ephs', mark_new_untrusted_ephs(self.hitl_log)['text']),
-            ('log_pvt', mark_pvt_warning(self.hitl_log)['text']),
-            ('log_soln_deadline', mark_soln_deadline(self.hitl_log)['text']),
-            ('log_iar', mark_iar(self.hitl_log)['text']),
-            ('log_iar_sats', mark_iar_add_sats(self.hitl_log)['text']),
-            ('log_errors', mark_errors(self.hitl_log)['text']),
-            ('log_warnings', mark_warnings(self.hitl_log)['text']),
-            ('log_obs_matching', mark_obs_matching(self.hitl_log)['text']),
-            ('log_starting', mark_starting(self.hitl_log)['text']),
-            ('log_hardfault', mark_hardfaults(self.hitl_log)['text']),
-            ('log_hardfault_unique', mark_hardfaults(self.hitl_log)['text']),
-            ('log_watchdog', mark_watchdog_reset(self.hitl_log)['text']),
-            ('log_dgnss_warnings', mark_dgnss_baseline_warning(self.hitl_log)['text']),
-            ('log_prn_tow_mismatch', mark_prn_tow_mismatch(self.hitl_log)['text']),
-            ('log_old_ephemeris', mark_old_ephemeris(self.hitl_log)['text']),
-            ('fixed2float', mark_fixed2float(self.hitl_log)['flags']),
-            ('log_null_acq_snr', mark_null_acq_snr(self.hitl_log)['text']),
-            ('obs_gaps', mark_obs_gaps(self.hitl_log)),
-            ('large_fixed_error', mark_large_position_errors(self.fixed, self.ref_rtk)),
-            ('large_fixed_jump', mark_large_jumps(self.fixed, self.ref_rtk)),
-            ('large_float_error', mark_large_position_errors(self.float_pos, self.ref_rtk)),
-            ('large_float_jump', mark_large_jumps(self.float_pos, self.ref_rtk)),
-            ('large_spp_error', mark_large_position_errors(self.spp, self.ref_spp, n=100)),
-            ('large_spp_jump', mark_large_jumps(self.spp, self.ref_spp, n=100)),
-            ('diff_ephemeris', mark_ephemeris_diffs(self.hitl_log.rover_ephemerides)['prn']),
-            ('diff_rover_lock_cnt', mark_lock_cnt_diff(self.hitl_log.rover_obs)),
-            ('diff_base_lock_cnt', mark_lock_cnt_diff(self.hitl_log.base_obs)),
-            ('log_no_channels_free', mark_no_channels_free(self.hitl_log)['text']),
-            ('log_false_phase_lock', mark_false_phase_lock(self.hitl_log)['text']),
-            ('obs_refsat_rover', get_observed_refsats(self.hitl_log.rover_obs)),
-            ('obs_refsat_base', get_observed_refsats(self.hitl_log.base_obs))]
-    self.anns = dict(anns)
-    sorted_anns = sorted(anns, key=lambda metric: len(metric[1]), reverse=True)
+    self.anns = {}
+
+    self.anns['logs'] = self.hitl_log.rover_logs.T['text']
+    self.anns['log_flash'] = mark_flash_saves(self.hitl_log)['text']
+    self.anns['log_trusted_eph'] = mark_new_trusted_ephs(self.hitl_log)['text']
+    self.anns['log_new_untrusted_ephs'] = mark_new_untrusted_ephs(self.hitl_log)['text']
+    self.anns['log_pvt'] = mark_pvt_warning(self.hitl_log)['text']
+    self.anns['log_soln_deadline'] = mark_soln_deadline(self.hitl_log)['text']
+    self.anns['log_iar'] = mark_iar(self.hitl_log)['text']
+    self.anns['log_iar_sats'] = mark_iar_add_sats(self.hitl_log)['text']
+    self.anns['log_errors'] = mark_errors(self.hitl_log)['text']
+    self.anns['log_warnings'] = mark_warnings(self.hitl_log)['text']
+    self.anns['log_obs_matching'] = mark_obs_matching(self.hitl_log)['text']
+    self.anns['log_starting'] = mark_starting(self.hitl_log)['text']
+    self.anns['log_hardfault'] = mark_hardfaults(self.hitl_log)['text']
+    self.anns['log_hardfault_unique'] = mark_hardfaults(self.hitl_log)['text']
+    self.anns['log_watchdog'] = mark_watchdog_reset(self.hitl_log)['text']
+    self.anns['log_dgnss_warnings'] = mark_dgnss_baseline_warning(self.hitl_log)['text']
+    self.anns['log_prn_tow_mismatch'] = mark_prn_tow_mismatch(self.hitl_log)['text']
+    self.anns['log_old_ephemeris'] = mark_old_ephemeris(self.hitl_log)['text']
+    self.anns['log_null_acq_snr'] = mark_null_acq_snr(self.hitl_log)['text']
+    if len(self.hitl_log.rover_rtk_ned):
+      self.anns['fixed2float'] = mark_fixed2float(self.hitl_log)['flags']
+    if len(self.hitl_log.rover_obs):
+      self.anns['obs_gaps'] = mark_obs_gaps(self.hitl_log)
+    try:
+      self.anns['large_fixed_error'] = mark_large_position_errors(self.fixed, self.ref_rtk)
+      self.anns['large_fixed_jump'] = mark_large_jumps(self.fixed, self.ref_rtk)
+    except AttributeError:
+      pass
+    try:
+      self.anns['large_float_error'] = mark_large_position_errors(self.float_pos, self.ref_rtk)
+      self.anns['large_float_jump'] = mark_large_jumps(self.float_pos, self.ref_rtk)
+    except AttributeError:
+      pass
+    self.anns['large_spp_error'] = mark_large_position_errors(self.spp, self.ref_spp, n=100)
+    self.anns['large_spp_jump'] = mark_large_jumps(self.spp, self.ref_spp, n=100)
+    self.anns['diff_ephemeris'] = mark_ephemeris_diffs(self.hitl_log.rover_ephemerides)['prn']
+    self.anns['diff_rover_lock_cnt'] = mark_lock_cnt_diff(self.hitl_log.rover_obs)
+    self.anns['diff_base_lock_cnt'] = mark_lock_cnt_diff(self.hitl_log.base_obs)
+    self.anns['log_no_channels_free'] = mark_no_channels_free(self.hitl_log)['text']
+    self.anns['log_false_phase_lock'] = mark_false_phase_lock(self.hitl_log)['text']
+    self.anns['obs_refsat_rover'] = get_observed_refsats(self.hitl_log.rover_obs)
+    self.anns['obs_refsat_base'] = get_observed_refsats(self.hitl_log.base_obs)
+
+    sorted_anns = sorted(self.anns.items(), key=lambda metric: len(metric[1]), reverse=True)
     if self.verbose:
       print "\n----- Annotations:"
       for n, ann in sorted_anns:
